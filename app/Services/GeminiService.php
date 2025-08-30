@@ -1,0 +1,152 @@
+<?php
+// File: app/Services/GeminiService.php
+
+namespace App\Services;
+
+use Gemini\Laravel\Facades\Gemini;
+use Gemini\Data\Content;
+use Gemini\Enums\Role;
+use Illuminate\Support\Facades\Log;
+// لا نحتاج إلى Spatie\PdfToText\Pdf بعد الآن
+// use Spatie\PdfToText\Pdf;
+use Gemini\Enums\MimeType;
+use Gemini\Data\Blob;
+
+class GeminiService
+{
+    /**
+     * @param string $text
+     * @return string
+     */
+    public function generateText(string $text): string
+    {
+        try {
+            // Send text to the Gemini model
+            $response = Gemini::generativeModel(model: 'gemini-2.0-flash')
+                ->generateContent($text);
+
+            // Extract text from the response
+            return $response->text();
+        } catch (\Exception $e) {
+            // Handle errors and return an appropriate message
+            Log::error('Error in generateText: ' . $e->getMessage());
+            return 'An error occurred: ' . $e->getMessage();
+        }
+    }
+
+    /**
+     * @param string $text
+     * @param string $imagePath
+     * @return string
+     */
+    public function generateTextWithImage(string $text, string $imagePath): string
+    {
+        try {
+            // Check if the file exists
+            if (!file_exists($imagePath)) {
+                return 'Image not found.';
+            }
+
+            $imageBlob = new Blob(
+                mimeType: MimeType::IMAGE_JPEG, // or IMAGE_PNG depending on the image type
+                data: base64_encode(file_get_contents($imagePath))
+            );
+
+            // Send text and image to the Gemini model
+            $response = Gemini::generativeModel(model: 'gemini-2.0-flash')
+                ->generateContent([$text, $imageBlob]);
+
+            return $response->text();
+        } catch (\Exception $e) {
+            Log::error('Error in generateTextWithImage: ' . $e->getMessage());
+            return 'An error occurred: ' . $e->getMessage();
+        }
+    }
+
+    /**
+     * @param string $pdfPath
+     * @return string
+     */
+     public function generateFromPdf(string $pdfPath, string $userPrompt = ''): string
+    {
+        if (!class_exists(\Imagick::class)) {
+            Log::error('Imagick extension not found.');
+            return 'Imagick extension is not installed or enabled.';
+        }
+
+        try {
+            // Create an Imagick object
+            $imagick = new \Imagick();
+            // Read the first page of the PDF
+            $imagick->readImage($pdfPath . '[0]');
+            $imagick->setImageFormat('jpeg');
+            $imagick->setResolution(300, 300);
+
+            $imageData = $imagick->getImageBlob();
+            $base64Data = base64_encode($imageData);
+
+            // Create a Blob from the image data
+            $imageBlob = new Blob(
+                mimeType: MimeType::IMAGE_JPEG,
+                data: $base64Data
+            );
+
+            // إضافة تعليمات محددة للموديل بناءً على طلب المستخدم
+            $prompt = "أنت مستشار هندسي متخصص في الكود السعودي للمباني السكنية SBC 1101-1102. تمثل منصة 'بناء' وتقدم إجاباتك باللغة العربية الفصحى بأسلوب مهني ودقيق وفقاً للكود السعودي المعتمد.
+
+             المعلومات الدقيق  السعودي :
+
+            
+            ";
+
+            // إذا كان المستخدم قد أرسل نصًا إضافيًا، قم بإضافته إلى الـ prompt
+            if (!empty($userPrompt)) {
+                $prompt .=  $userPrompt;
+            }
+
+            // Send the image and the detailed prompt to the Gemini model
+            $response = Gemini::generativeModel(model: 'gemini-2.0-flash')
+                ->generateContent([
+                    $prompt,
+                    $imageBlob
+                ]);
+
+            return $response->text();
+        } catch (\Exception $e) {
+            Log::error('Error in GeminiService during PDF analysis: ' . $e->getMessage());
+            return 'An error occurred while analyzing the PDF file: ' . $e->getMessage();
+        } finally {
+            if (isset($imagick)) {
+                $imagick->clear();
+                $imagick->destroy();
+            }
+        }
+    }
+
+    /**
+     * @param array $history
+     * @param string $message
+     * @return string
+     */
+    public function chat(array $history, string $message): string
+    {
+        try {
+            $parsedHistory = array_map(function ($item) {
+                return Content::parse(
+                    part: $item['part'],
+                    role: Role::from($item['role'])
+                );
+            }, $history);
+
+            $chat = Gemini::chat(model: 'gemini-2.0-flash')
+                ->startChat(history: $parsedHistory);
+
+            $response = $chat->sendMessage($message);
+
+            return $response->text();
+        } catch (\Exception $e) {
+            Log::error('Error in chat: ' . $e->getMessage());
+            return 'An error occurred: ' . $e->getMessage();
+        }
+    }
+}

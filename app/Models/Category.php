@@ -1,0 +1,44 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Category extends Model
+{
+    protected $fillable = [
+    
+        'name',
+        'parent_id',
+    ];
+
+
+
+    /**
+     * الفئة الأساسية (الأب).
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(Category::class, 'parent_id');
+    }
+
+    public function childrenRecursive()
+{
+    return $this->hasMany(Category::class, 'parent_id')->with('childrenRecursive');
+}
+
+    /**
+     * الفئات الفرعية (الأبناء).
+     */
+    public function children(): HasMany
+    {
+        return $this->hasMany(Category::class, 'parent_id');
+    }
+    public function scopeParentsOnly($query)
+    {
+        return $query->whereNull('parent_id');
+    }
+
+}
